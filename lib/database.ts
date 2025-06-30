@@ -1,4 +1,4 @@
-"use client"
+// "use client"
 
 import { getSupabaseClient } from "./supabase"
 import type { DbUser, DbCourse, DbUserProgress } from "./supabase"
