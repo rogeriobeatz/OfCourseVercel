@@ -14,8 +14,19 @@ export interface DbCourse {
   lessons: any[]
   created_at: string
   updated_at: string
-  created_by: string
+  created_by: string // Changed from user_id to created_by to match schema
   category?: string
+  total_lessons: number
+  estimated_hours: number
+  difficulty_score: number
+  enrollment_count: number
+  rating_average: number
+  rating_count: number
+  is_featured: boolean
+  is_archived: boolean
+  price: number
+  currency: string
+  format: string // Added format to DbCourse
 }
 
 export interface DbUserProgress {
@@ -125,8 +136,9 @@ export function dbCourseToAppCourse(dbCourse: DbCourse): Course {
     id: dbCourse.id,
     title: dbCourse.title,
     description: dbCourse.description,
-    level: dbCourse.level,
+    level: dbCourse.level as any, // Cast to any to match Course interface
     duration: dbCourse.duration,
+    format: dbCourse.format, // Ensure format is mapped
     lessons: dbCourse.lessons.map((lesson, index) => ({
       id: lesson.id || `lesson-${index + 1}`,
       title: lesson.title,
@@ -158,39 +170,73 @@ export function dbProgressToAppProgress(dbProgress: DbUserProgress): UserProgres
 
 // Save course to database
 export async function saveCourse(
-  course: Omit<Course, "id" | "createdAt" | "updatedAt">,
-  userId: string,
+  courseData: {
+    title: string
+    description: string
+    duration: string
+    level: string
+    format: string
+    lessons: any[]
+    created_by: string
+    is_public?: boolean
+    category?: string
+  },
+  userId: string, // Ensure userId is passed and used
 ): Promise<Course> {
-  const { data, error } = await supabase
-    .from("courses")
-    .insert({
-      title: course.title,
-      description: course.description,
-      level: course.level,
-      duration: course.duration,
-      lessons: course.lessons.map((lesson, index) => ({
-        id: lesson.id || `lesson-${index + 1}`,
-        title: lesson.title,
-        objective: lesson.objective,
-        content: lesson.content || null,
-        materials: lesson.materials || null,
-        practice: lesson.practice || null,
-        duration: lesson.duration || 45,
-        order: lesson.order || index + 1,
-        quiz: lesson.quiz || null,
-      })),
-      created_by: userId,
-      category: "Tecnologia", // Default category
-    })
-    .select()
-    .single()
+  try {
+    // Calculate derived fields for the database
+    const totalLessons = courseData.lessons.length
+    const estimatedHours =
+      Math.round(
+        (courseData.lessons.reduce((acc: number, lesson: any) => acc + (lesson.duration || 45), 0) / 60) * 100,
+      ) / 100
+    const difficultyScore =
+      courseData.level === "iniciante"
+        ? 2
+        : courseData.level === "basico"
+          ? 4
+          : courseData.level === "intermediario"
+            ? 6
+            : 8
 
-  if (error) {
-    console.error("Error saving course:", error)
-    throw new Error("Falha ao salvar curso")
+    const { data, error } = await supabase
+      .from("courses")
+      .insert({
+        title: courseData.title,
+        description: courseData.description,
+        level: courseData.level,
+        duration: courseData.duration,
+        format: courseData.format, // Ensure format is included
+        lessons: courseData.lessons, // Use the already prepared lessons array
+        created_by: userId, // Use the passed userId
+        is_public: courseData.is_public ?? true,
+        category: courseData.category || "Tecnologia",
+        total_lessons: totalLessons,
+        estimated_hours: estimatedHours,
+        difficulty_score: difficultyScore,
+        enrollment_count: 0,
+        rating_average: 0,
+        rating_count: 0,
+        is_featured: false,
+        is_archived: false,
+        price: 0,
+        currency: "BRL",
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error details in saveCourse:", error)
+      throw error // Re-throw to be caught by the outer try-catch in generateCourseAction
+    }
+
+    return dbCourseToAppCourse(data)
+  } catch (error) {
+    console.error("Error in saveCourse function:", error)
+    throw new Error(
+      "Falha ao salvar curso no banco de dados: " + (error instanceof Error ? error.message : "Erro desconhecido"),
+    )
   }
-
-  return dbCourseToAppCourse(data)
 }
 
 // Get course by ID
@@ -242,7 +288,7 @@ export async function getCoursesByUser(userId: string): Promise<DbCourse[]> {
   const { data, error } = await supabase
     .from("courses")
     .select("*")
-    .eq("created_by", userId)
+    .eq("created_by", userId) // Corrected column name to created_by
     .order("created_at", { ascending: false })
 
   if (error) {
