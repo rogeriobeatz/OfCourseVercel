@@ -1,4 +1,4 @@
-// "use client"
+"use client"
 
 import { getSupabaseClient } from "./supabase"
 import type { DbUser, DbCourse, DbUserProgress } from "./supabase"
@@ -62,6 +62,17 @@ export async function getUserById(userId: string): Promise<DbUser | null> {
   }
 }
 
+export async function updateUser(userId: string, updates: Partial<DbUser>): Promise<DbUser | null> {
+  try {
+    const { data, error } = await supabase.from("users").update(updates).eq("id", userId).select().single()
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error("Error updating user:", error)
+    return null
+  }
+}
+
 // Course operations
 export async function saveCourse(courseData: {
   title: string
@@ -72,6 +83,7 @@ export async function saveCourse(courseData: {
   lessons: any[]
   created_by: string
   is_public?: boolean
+  category?: string
 }): Promise<DbCourse | null> {
   try {
     // Ensure lessons have simple, consistent IDs
@@ -91,6 +103,7 @@ export async function saveCourse(courseData: {
       lessons: processedLessons,
       created_by: courseData.created_by,
       is_public: courseData.is_public ?? true,
+      category: courseData.category || "Tecnologia",
       total_lessons: processedLessons.length,
       estimated_hours:
         Math.round(
@@ -147,6 +160,28 @@ export async function getCourseById(courseId: string): Promise<DbCourse | null> 
   } catch (error) {
     console.error("Error getting course:", error)
     return null
+  }
+}
+
+export async function updateCourse(courseId: string, updates: Partial<DbCourse>): Promise<DbCourse | null> {
+  try {
+    const { data, error } = await supabase.from("courses").update(updates).eq("id", courseId).select().single()
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error("Error updating course:", error)
+    return null
+  }
+}
+
+export async function deleteCourse(courseId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from("courses").update({ is_archived: true }).eq("id", courseId)
+    if (error) throw error
+    return true
+  } catch (error) {
+    console.error("Error deleting course:", error)
+    return false
   }
 }
 
