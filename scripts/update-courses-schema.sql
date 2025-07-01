@@ -1,39 +1,69 @@
--- Script para atualizar cursos existentes para suportar geração de conteúdo sob demanda
--- Execute este script no Supabase SQL Editor
-
--- Primeiro, vamos verificar se há cursos com conteúdo completo que precisam ser marcados
-UPDATE courses 
-SET lessons = jsonb_set(
-  lessons,
-  '{}',
-  (
-    SELECT jsonb_agg(
-      CASE 
-        WHEN lesson->>'content' IS NOT NULL AND lesson->>'content' != '' 
-        THEN lesson
-        ELSE jsonb_set(lesson, '{content}', 'null'::jsonb)
-      END
-    )
-    FROM jsonb_array_elements(lessons) AS lesson
-  )
-)
-WHERE jsonb_typeof(lessons) = 'array';
-
--- Adicionar índice para melhorar performance de busca por cursos
-CREATE INDEX IF NOT EXISTS idx_courses_created_by ON courses(created_by);
-CREATE INDEX IF NOT EXISTS idx_courses_category ON courses(category);
-CREATE INDEX IF NOT EXISTS idx_courses_level ON courses(level);
-
--- Adicionar campo category se não existir
+-- Ensure courses table has all necessary columns
 ALTER TABLE courses 
 ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'Tecnologia';
 
--- Atualizar cursos existentes sem categoria
+-- Update existing courses to have a default category if null
 UPDATE courses 
 SET category = 'Tecnologia' 
 WHERE category IS NULL;
 
--- Comentário sobre a nova estrutura:
--- Agora os cursos podem ter lessons com content = null
--- Isso indica que o conteúdo precisa ser gerado sob demanda
--- A aplicação irá detectar isso e chamar a IA para gerar o conteúdo
+-- Ensure user_progress table exists with correct structure
+CREATE TABLE IF NOT EXISTS user_progress (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    completed_lessons TEXT[] DEFAULT '{}',
+    quiz_scores JSONB DEFAULT '{}',
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    certificate_issued BOOLEAN DEFAULT FALSE,
+    current_lesson_id TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, course_id)
+);
+
+-- Enable RLS on user_progress
+ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for user_progress
+DROP POLICY IF EXISTS "Users can view own progress" ON user_progress;
+CREATE POLICY "Users can view own progress" ON user_progress
+    FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own progress" ON user_progress;
+CREATE POLICY "Users can insert own progress" ON user_progress
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own progress" ON user_progress;
+CREATE POLICY "Users can update own progress" ON user_progress
+    FOR UPDATE USING (auth.uid() = user_id);
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_user_progress_user_id ON user_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_progress_course_id ON user_progress(course_id);
+CREATE INDEX IF NOT EXISTS idx_courses_user_id ON courses(user_id);
+CREATE INDEX IF NOT EXISTS idx_courses_category ON courses(category);
+
+-- Update function for updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create trigger for courses table
+DROP TRIGGER IF EXISTS update_courses_updated_at ON courses;
+CREATE TRIGGER update_courses_updated_at
+    BEFORE UPDATE ON courses
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create trigger for user_progress table
+DROP TRIGGER IF EXISTS update_user_progress_updated_at ON user_progress;
+CREATE TRIGGER update_user_progress_updated_at
+    BEFORE UPDATE ON user_progress
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
