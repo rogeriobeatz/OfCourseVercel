@@ -7,90 +7,79 @@ export interface CourseGenerationData {
   objetivo: string
   nivel: "iniciante" | "basico" | "intermediario" | "avancado"
   formato: "texto" | "video" | "pratica" | "misto"
-  tempo: string // horas por semana
-  duracao: string // semanas de duração
+  tempo: string
+  duracao: string
   comentarios?: string
 }
 
-interface BasicCourse {
-  id: string
-  title: string
-  description: string
-}
-
-export async function generateCourseAction(
-  data: CourseGenerationData,
-  userId: string,
-): Promise<{ success: boolean; course?: BasicCourse; error?: string }> {
-  if (!userId || typeof userId !== "string") {
-    return { success: false, error: "Usuário inválido." }
-  }
-
-  if (!data?.objetivo || !data?.formato) {
-    return { success: false, error: "Dados insuficientes para gerar o curso." }
-  }
-
+export async function generateCourseAction(data: CourseGenerationData, userId: string) {
   try {
-    console.log("Iniciando geração de curso para usuário:", userId)
-    console.log("Dados do formulário:", data)
+    console.log("Gerando curso com dados:", data)
 
-    const generatedCourse = await generateCourseWithAI({
-      objetivo: data.objetivo,
-      nivel: data.nivel,
-      formato: data.formato,
-      tempo: data.tempo,
-      duracao: data.duracao,
-      comentarios: data.comentarios ?? "",
-    })
-
-    console.log("Estrutura gerada pela IA:", generatedCourse.title)
-
-    const lessonsForDb = generatedCourse.lessons.map((lesson) => ({
-      id: lesson.id,
-      title: lesson.title,
-      objective: lesson.objective,
-      order: lesson.order,
-      duration: 45,
-      content: null,
-      materials: null,
-      practice: null,
-      quiz: null,
-    }))
-
-    const savedCourse = await saveCourse(
-      {
-        title: generatedCourse.title,
-        description: generatedCourse.description,
-        duration: generatedCourse.duration,
-        level: generatedCourse.level,
-        format: data.formato,
-        lessons: lessonsForDb,
-        created_by: userId,
-        is_public: true,
-        category: "Tecnologia",
-      },
-      userId,
-    )
-
-    if (!savedCourse) {
-      throw new Error("Falha ao salvar curso no banco de dados.")
+    // Validação
+    if (!data.objetivo || !data.nivel || !data.formato || !data.tempo || !data.duracao) {
+      throw new Error("Dados insuficientes para gerar o curso.")
     }
 
-    console.log("Curso salvo com sucesso:", savedCourse.id)
+    if (!userId) {
+      throw new Error("Usuário não autenticado.")
+    }
+
+    // Gerar curso com IA
+    const generatedCourse = await generateCourseWithAI(data.objetivo, data.nivel, data.duracao)
+
+    // Adicionar categoria baseada no objetivo
+    const category = inferCategory(data.objetivo)
+    generatedCourse.category = category
+
+    // Salvar no banco
+    const savedCourse = await saveCourse(generatedCourse, userId)
+
+    console.log("Curso gerado e salvo com sucesso:", savedCourse.id)
 
     return {
       success: true,
-      course: {
-        id: savedCourse.id,
-        title: savedCourse.title,
-        description: savedCourse.description,
-      },
+      course: savedCourse,
     }
   } catch (error) {
     console.error("Erro ao gerar curso:", error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Erro desconhecido ao gerar curso.",
+      error: error instanceof Error ? error.message : "Erro desconhecido",
     }
   }
+}
+
+function inferCategory(objetivo: string): string {
+  const objetivo_lower = objetivo.toLowerCase()
+
+  if (
+    objetivo_lower.includes("programação") ||
+    objetivo_lower.includes("código") ||
+    objetivo_lower.includes("desenvolvimento")
+  ) {
+    return "Tecnologia"
+  }
+  if (objetivo_lower.includes("design") || objetivo_lower.includes("ui") || objetivo_lower.includes("ux")) {
+    return "Design"
+  }
+  if (
+    objetivo_lower.includes("marketing") ||
+    objetivo_lower.includes("vendas") ||
+    objetivo_lower.includes("publicidade")
+  ) {
+    return "Marketing"
+  }
+  if (
+    objetivo_lower.includes("negócio") ||
+    objetivo_lower.includes("empreendedorismo") ||
+    objetivo_lower.includes("gestão")
+  ) {
+    return "Negócios"
+  }
+  if (objetivo_lower.includes("idioma") || objetivo_lower.includes("inglês") || objetivo_lower.includes("espanhol")) {
+    return "Idiomas"
+  }
+
+  return "Desenvolvimento Pessoal"
 }

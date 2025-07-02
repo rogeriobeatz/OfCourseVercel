@@ -31,53 +31,60 @@ export async function generateLessonContentOnDemand(
   })
 
   const prompt = `
-Você é um especialista em educação. Gere o CONTEÚDO COMPLETO da aula abaixo.
-IMPORTANTÍSSIMO: para evitar erros de JSON use **Base64** nas grandes strings!
+Você é um especialista em educação online. Crie conteúdo COMPLETO e ENVOLVENTE para esta aula.
 
 Curso: "${courseTitle}"
 Nível: ${courseLevel}
 Aula: "${lessonTitle}"
 Objetivo: "${lessonObjective}"
 
-Retorne APENAS um JSON válido com esta forma exata
+IMPORTANTE: Use Base64 para textos longos para evitar erros de JSON!
+
+Retorne APENAS um JSON válido:
 {
- "content_b64":   <string – markdown completo em Base64>,
+ "content_b64": "<conteúdo completo da aula em markdown, codificado em Base64>",
  "materials": [
    {
-     "title": <string>,
-     "type": "pdf" | "video" | "link",
-     "url":  <string>,
-     "description_b64": <string>              // opcional
+     "title": "Nome do material",
+     "type": "pdf" | "video" | "link" | "article",
+     "url": "https://exemplo.com/recurso",
+     "description_b64": "<descrição em Base64>"
    }
  ],
  "practice": {
-   "title": <string>,
-   "description_b64": <string>,
-   "steps": [<string>, …]
+   "title": "Exercício Prático",
+   "description_b64": "<descrição detalhada em Base64>",
+   "steps": ["Passo 1", "Passo 2", "Passo 3"]
  },
- "duration": <number>,                        // minutos
+ "duration": 45,
  "quiz": {
    "id": "quiz-1",
-   "title": <string>,
+   "title": "Quiz da Aula",
    "questions": [
      {
        "id": "q1",
-       "question": <string>,
-       "options": [<string>, <string>, <string>, <string>],
-       "correct": <number 0-3>
+       "question": "Pergunta clara e objetiva?",
+       "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
+       "correct": 0
      }
    ]
  }
 }
 
-Nunca inclua campos extras nem comentários.
+DIRETRIZES:
+- Conteúdo: 1200+ palavras, didático, com exemplos reais
+- Materiais: Inclua links reais da internet quando possível
+- Prática: Exercícios aplicáveis e relevantes
+- Quiz: 4-5 perguntas desafiadoras mas justas
+- Use referências atuais e recursos online existentes
 `
+
   try {
     const result = await model.generateContent(prompt)
     const response = await result.response
     const rawText = response.text().trim()
 
-    /* Try to isolate the JSON (strip \`\`\`json fences if present) */
+    /* Try to isolate the JSON (strip ```json fences if present) */
     const match = rawText.match(/```json\s*([\s\S]*?)\s*```/)
     const jsonString = (match ? match[1] : rawText)
       .replace(/^[^{]*/, "") /* garbage before { */
@@ -107,23 +114,48 @@ Nunca inclua campos extras nem comentários.
 
     /* minimal but still valid fallback */
     return {
-      content: `# ${lessonTitle}\n\n${lessonObjective}`,
-      materials: [],
+      content: `# ${lessonTitle}\n\n## Objetivo\n${lessonObjective}\n\n## Introdução\n\nEsta aula aborda os conceitos fundamentais relacionados ao tema proposto. Você aprenderá de forma prática e objetiva.\n\n### Tópicos Principais\n\n1. **Conceitos Fundamentais**\n   - Definições importantes\n   - Contexto histórico\n   - Aplicações práticas\n\n2. **Exemplos Práticos**\n   - Casos de uso reais\n   - Demonstrações passo a passo\n   - Melhores práticas\n\n3. **Aplicação no Mundo Real**\n   - Cenários profissionais\n   - Tendências atuais\n   - Oportunidades de carreira\n\n## Conclusão\n\nAo final desta aula, você terá uma compreensão sólida dos conceitos apresentados e estará preparado para aplicá-los na prática.`,
+      materials: [
+        {
+          title: "Documentação Oficial",
+          type: "link",
+          url: "https://docs.google.com",
+          description: "Recursos oficiais e documentação técnica",
+        },
+        {
+          title: "Artigo Complementar",
+          type: "article",
+          url: "https://medium.com",
+          description: "Leitura adicional sobre o tema",
+        },
+      ],
       practice: {
-        title: "Exercício",
-        description: "Revise e resuma o conteúdo em 3 parágrafos.",
-        steps: [],
+        title: "Exercício Prático",
+        description:
+          "Aplique os conhecimentos adquiridos nesta aula através de um exercício hands-on que simula situações reais do mercado.",
+        steps: [
+          "Revise o conteúdo apresentado na aula",
+          "Identifique os pontos principais e conceitos-chave",
+          "Pratique com os exemplos fornecidos",
+          "Crie seu próprio exemplo baseado no aprendizado",
+        ],
       },
       duration: 45,
       quiz: {
         id: "quiz-1",
-        title: "Quiz Rápido",
+        title: "Quiz da Aula",
         questions: [
           {
             id: "q1",
-            question: "Qual o objetivo principal desta aula?",
-            options: ["Entender o tema", "Nada", "Dormir", "Todas"],
+            question: "Qual é o objetivo principal desta aula?",
+            options: ["Aprender conceitos básicos", "Fazer exercícios", "Ler materiais", "Todas as anteriores"],
             correct: 0,
+          },
+          {
+            id: "q2",
+            question: "Qual a importância da prática no aprendizado?",
+            options: ["Não é importante", "Ajuda a fixar conceitos", "É opcional", "Apenas para avaliação"],
+            correct: 1,
           },
         ],
       },
@@ -179,7 +211,7 @@ Crie entre 5-8 aulas. Não inclua conteúdo, quiz ou materiais - apenas estrutur
     // Tentar extrair JSON da resposta
     let jsonString = text.trim()
 
-    // Se tem \`\`\`json, extrair apenas o conteúdo
+    // Se tem ```json, extrair apenas o conteúdo
     const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/)
     if (jsonMatch) {
       jsonString = jsonMatch[1].trim()
