@@ -5,73 +5,27 @@ import { getCourseById, updateCourse } from "@/lib/database"
 
 export async function generateLessonContentAction(courseId: string, lessonId: string) {
   try {
-    console.log(`Gerando conteúdo para aula ${lessonId} do curso ${courseId}`)
-
-    // Buscar curso no banco
     const course = await getCourseById(courseId)
-    if (!course) {
-      throw new Error("Curso não encontrado")
-    }
+    if (!course) throw new Error("Curso não encontrado")
 
-    // Encontrar a aula específica
-    const lesson = course.lessons.find((l: any) => l.id === lessonId)
-    if (!lesson) {
-      throw new Error("Aula não encontrada")
-    }
+    const lessonIdx = course.lessons.findIndex((l: any) => l.id === lessonId)
+    if (lessonIdx === -1) throw new Error("Aula não encontrada")
 
-    // Verificar se já tem conteúdo
+    const lesson = course.lessons[lessonIdx]
     if (lesson.content) {
-      console.log("Aula já possui conteúdo, retornando existente")
-      return {
-        success: true,
-        content: lesson,
-      }
+      return { success: true, ...lesson }
     }
 
-    // Gerar conteúdo com IA
-    const generatedContent = await generateLessonContentOnDemand(
-      lesson.title,
-      lesson.objective,
-      course.title,
-      course.level,
-    )
+    const generated = await generateLessonContentOnDemand(lesson.title, lesson.objective, course.title, course.level)
 
-    // Atualizar a aula no array de lessons
-    const updatedLessons = course.lessons.map((l: any) => {
-      if (l.id === lessonId) {
-        return {
-          ...l,
-          content: generatedContent.content,
-          materials: generatedContent.materials,
-          practice: generatedContent.practice,
-          quiz: generatedContent.quiz,
-          duration: generatedContent.duration,
-        }
-      }
-      return l
-    })
-
-    // Salvar no banco
+    /* merge & persist */
+    const updatedLessons = [...course.lessons]
+    updatedLessons[lessonIdx] = { ...lesson, ...generated }
     await updateCourse(courseId, { lessons: updatedLessons })
 
-    console.log("Conteúdo da aula gerado e salvo com sucesso")
-
-    return {
-      success: true,
-      content: {
-        ...lesson,
-        content: generatedContent.content,
-        materials: generatedContent.materials,
-        practice: generatedContent.practice,
-        quiz: generatedContent.quiz,
-        duration: generatedContent.duration,
-      },
-    }
-  } catch (error) {
-    console.error("Erro ao gerar conteúdo da aula:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-    }
+    return { success: true, ...updatedLessons[lessonIdx] }
+  } catch (err: any) {
+    console.error("generateLessonContentAction error:", err)
+    return { success: false, error: err.message ?? "Erro desconhecido" }
   }
 }

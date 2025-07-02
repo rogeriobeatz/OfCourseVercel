@@ -4,6 +4,21 @@ import type { Course, UserProgress } from "@/types/course"
 // Usa anon key no client e service-role no server, evitando erro de variável não definida.
 const supabase = getSupabaseClient()
 
+// --- Enum maps para respeitar CHECK CONSTRAINTS do Supabase ---
+const levelMap: Record<string, string> = {
+  iniciante: "beginner",
+  basico: "basic",
+  intermediario: "intermediate",
+  avancado: "advanced",
+}
+
+const formatMap: Record<string, string> = {
+  texto: "text",
+  video: "video",
+  pratica: "practice",
+  misto: "mixed",
+}
+
 // Database types
 export interface DbCourse {
   id: string
@@ -204,11 +219,12 @@ export async function saveCourse(
       .insert({
         title: courseData.title,
         description: courseData.description,
-        level: courseData.level,
+        // Converte nível e formato para strings aceitas pelo banco
+        level: levelMap[courseData.level] ?? courseData.level,
         duration: courseData.duration,
-        format: courseData.format, // Ensure format is included
-        lessons: courseData.lessons, // Use the already prepared lessons array
-        created_by: userId, // Use the passed userId
+        format: formatMap[courseData.format] ?? courseData.format,
+        lessons: courseData.lessons,
+        created_by: userId,
         is_public: courseData.is_public ?? true,
         category: courseData.category || "Tecnologia",
         total_lessons: totalLessons,

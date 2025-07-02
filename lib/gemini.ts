@@ -2,6 +2,135 @@ import { GoogleGenerativeAI } from "@google/generative-ai"
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
+/* ---------- helpers ---------- */
+function decodeB64(b64: string | undefined) {
+  if (!b64) return ""
+  try {
+    return Buffer.from(b64, "base64").toString("utf-8")
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * Turns huge free-text fields into base-64 to keep JSON valid.
+ * After parse we decode and move them back to their plain keys.
+ */
+export async function generateLessonContentOnDemand(
+  lessonTitle: string,
+  lessonObjective: string,
+  courseTitle: string,
+  courseLevel: string,
+) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: {
+      maxOutputTokens: 4096,
+      temperature: 0.7,
+    },
+  })
+
+  const prompt = `
+Você é um especialista em educação. Gere o CONTEÚDO COMPLETO da aula abaixo.
+IMPORTANTÍSSIMO: para evitar erros de JSON use **Base64** nas grandes strings!
+
+Curso: "${courseTitle}"
+Nível: ${courseLevel}
+Aula: "${lessonTitle}"
+Objetivo: "${lessonObjective}"
+
+Retorne APENAS um JSON válido com esta forma exata
+{
+ "content_b64":   <string – markdown completo em Base64>,
+ "materials": [
+   {
+     "title": <string>,
+     "type": "pdf" | "video" | "link",
+     "url":  <string>,
+     "description_b64": <string>              // opcional
+   }
+ ],
+ "practice": {
+   "title": <string>,
+   "description_b64": <string>,
+   "steps": [<string>, …]
+ },
+ "duration": <number>,                        // minutos
+ "quiz": {
+   "id": "quiz-1",
+   "title": <string>,
+   "questions": [
+     {
+       "id": "q1",
+       "question": <string>,
+       "options": [<string>, <string>, <string>, <string>],
+       "correct": <number 0-3>
+     }
+   ]
+ }
+}
+
+Nunca inclua campos extras nem comentários.
+`
+  try {
+    const result = await model.generateContent(prompt)
+    const response = await result.response
+    const rawText = response.text().trim()
+
+    /* Try to isolate the JSON (strip \`\`\`json fences if present) */
+    const match = rawText.match(/```json\s*([\s\S]*?)\s*```/)
+    const jsonString = (match ? match[1] : rawText)
+      .replace(/^[^{]*/, "") /* garbage before { */
+      .replace(/[^}]*$/, "") /* garbage after } */
+
+    const parsed = JSON.parse(jsonString)
+
+    /* --- decode b64 fields back to plain text --- */
+    parsed.content = decodeB64(parsed.content_b64)
+    delete parsed.content_b64
+
+    if (Array.isArray(parsed.materials)) {
+      parsed.materials = parsed.materials.map((m: any) => ({
+        ...m,
+        description: decodeB64(m?.description_b64),
+      }))
+    }
+
+    if (parsed.practice) {
+      parsed.practice.description = decodeB64(parsed.practice?.description_b64)
+      delete parsed.practice.description_b64
+    }
+
+    return parsed
+  } catch (err) {
+    console.error("Gemini JSON decode error → fallback:", err)
+
+    /* minimal but still valid fallback */
+    return {
+      content: `# ${lessonTitle}\n\n${lessonObjective}`,
+      materials: [],
+      practice: {
+        title: "Exercício",
+        description: "Revise e resuma o conteúdo em 3 parágrafos.",
+        steps: [],
+      },
+      duration: 45,
+      quiz: {
+        id: "quiz-1",
+        title: "Quiz Rápido",
+        questions: [
+          {
+            id: "q1",
+            question: "Qual o objetivo principal desta aula?",
+            options: ["Entender o tema", "Nada", "Dormir", "Todas"],
+            correct: 0,
+          },
+        ],
+      },
+    }
+  }
+}
+
 export async function generateCourseWithAI(topic: string, level: string, duration: string) {
   try {
     const model = genAI.getGenerativeModel({
@@ -50,7 +179,7 @@ Crie entre 5-8 aulas. Não inclua conteúdo, quiz ou materiais - apenas estrutur
     // Tentar extrair JSON da resposta
     let jsonString = text.trim()
 
-    // Se tem ```json, extrair apenas o conteúdo
+    // Se tem \`\`\`json, extrair apenas o conteúdo
     const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/)
     if (jsonMatch) {
       jsonString = jsonMatch[1].trim()
@@ -99,124 +228,5 @@ Crie entre 5-8 aulas. Não inclua conteúdo, quiz ou materiais - apenas estrutur
   } catch (error) {
     console.error("Erro ao gerar curso:", error)
     throw new Error("Falha ao gerar curso com IA")
-  }
-}
-
-export async function generateLessonContentOnDemand(
-  lessonTitle: string,
-  lessonObjective: string,
-  courseTitle: string,
-  courseLevel: string,
-) {
-  try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        maxOutputTokens: 4096,
-        temperature: 0.7,
-      },
-    })
-
-    const prompt = `
-Gere o conteúdo completo para esta aula:
-
-Curso: "${courseTitle}"
-Nível: ${courseLevel}
-Aula: "${lessonTitle}"
-Objetivo: "${lessonObjective}"
-
-Retorne APENAS um JSON válido com esta estrutura:
-{
-  "content": "Conteúdo da aula em markdown (800-1200 palavras)",
-  "materials": [
-    {
-      "title": "Nome do material",
-      "type": "pdf",
-      "url": "#"
-    }
-  ],
-  "practice": {
-    "title": "Exercício Prático",
-    "description": "Descrição do exercício",
-    "steps": ["Passo 1", "Passo 2"]
-  },
-  "quiz": {
-    "id": "quiz-1",
-    "title": "Quiz da Aula",
-    "questions": [
-      {
-        "id": "q1",
-        "question": "Pergunta?",
-        "options": ["A", "B", "C", "D"],
-        "correct": 0
-      }
-    ]
-  },
-  "duration": 45
-}
-
-O conteúdo deve ser educativo, bem estruturado e adequado ao nível ${courseLevel}.
-Crie 3-4 perguntas no quiz.
-`
-
-    const result = await model.generateContent(prompt)
-    const response = await result.response
-    const text = response.text()
-
-    console.log("Resposta da IA para conteúdo:", text.substring(0, 500) + "...")
-
-    // Tentar extrair JSON da resposta
-    let jsonString = text.trim()
-
-    // Se tem ```json, extrair apenas o conteúdo
-    const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/)
-    if (jsonMatch) {
-      jsonString = jsonMatch[1].trim()
-    }
-
-    // Limpar possíveis caracteres extras
-    jsonString = jsonString.replace(/^[^{]*/, "").replace(/[^}]*$/, "")
-
-    // Tentar múltiplas estratégias de parsing
-    try {
-      const lessonContent = JSON.parse(jsonString)
-      console.log("Conteúdo da aula gerado com sucesso")
-      return lessonContent
-    } catch (parseError) {
-      console.error("Falha no JSON.parse, jsonString ➜", jsonString.substring(0, 200) + "...")
-
-      // Fallback com conteúdo básico
-      return {
-        content: `# ${lessonTitle}\n\n## Objetivo\n${lessonObjective}\n\n## Conteúdo\n\nEsta aula aborda os conceitos fundamentais relacionados ao tema proposto. Você aprenderá de forma prática e objetiva.\n\n### Tópicos Principais\n\n1. **Introdução ao tema**\n2. **Conceitos fundamentais**\n3. **Aplicações práticas**\n4. **Exercícios**\n\n## Conclusão\n\nAo final desta aula, você terá uma compreensão sólida dos conceitos apresentados.`,
-        materials: [
-          {
-            title: "Material de Apoio",
-            type: "pdf",
-            url: "#",
-          },
-        ],
-        practice: {
-          title: "Exercício Prático",
-          description: "Aplique os conhecimentos adquiridos nesta aula",
-          steps: ["Revise o conteúdo apresentado", "Identifique os pontos principais", "Pratique com exemplos"],
-        },
-        quiz: {
-          id: "quiz-1",
-          title: "Quiz da Aula",
-          questions: [
-            {
-              id: "q1",
-              question: "Qual é o objetivo principal desta aula?",
-              options: ["Aprender conceitos básicos", "Fazer exercícios", "Ler materiais", "Todas as anteriores"],
-              correct: 0,
-            },
-          ],
-        },
-        duration: 45,
-      }
-    }
-  } catch (error) {
-    console.error("Erro ao gerar conteúdo da aula:", error)
-    throw new Error("Falha ao gerar conteúdo da aula")
   }
 }
